@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -46,9 +47,18 @@ func GetCurrentUser() (string, error) {
 	output, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			return "", fmt.Errorf("gh command failed: %s", string(exitErr.Stderr))
+			stderr := string(exitErr.Stderr)
+			// Check for common auth errors
+			if strings.Contains(stderr, "auth login") || strings.Contains(stderr, "not logged") {
+				return "", fmt.Errorf("not authenticated with GitHub CLI\n\nRun: gh auth login")
+			}
+			return "", fmt.Errorf("gh command failed: %s", stderr)
 		}
-		return "", fmt.Errorf("failed to run gh: %w (is gh CLI installed and authenticated?)", err)
+		// gh not found in PATH
+		if execErr, ok := err.(*exec.Error); ok && execErr.Err == exec.ErrNotFound {
+			return "", fmt.Errorf("GitHub CLI (gh) not found\n\nInstall it from: https://cli.github.com\nThen run: gh auth login")
+		}
+		return "", fmt.Errorf("failed to run gh: %w", err)
 	}
 
 	username := string(output)

@@ -15,8 +15,15 @@ import (
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show sync status",
-	Long:  `Shows the current sync status including connected accounts and last sync time.`,
-	RunE:  runStatus,
+	Long: `Shows the current sync status including connected accounts and last sync time.
+
+Displays:
+  - Your GitHub username (via gh CLI)
+  - All synced users and their contribution counts
+  - When each user last synced
+  - How many contributions you've mirrored from each user`,
+	Example: `  vanity status`,
+	RunE:    runStatus,
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {

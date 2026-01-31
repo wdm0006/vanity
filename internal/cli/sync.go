@@ -15,7 +15,24 @@ var syncCmd = &cobra.Command{
 	Use:   "sync",
 	Short: "Sync contributions with collaborators",
 	Long: `Fetches your GitHub contributions, exports them to the shared repo,
-imports other collaborators' contributions, and creates mirror commits.`,
+imports other collaborators' contributions, and creates mirror commits.
+
+The sync process:
+  1. Pulls latest changes from the remote
+  2. Fetches your contribution data via GitHub API (using gh CLI)
+  3. Saves your contributions to .vanity/<username>.json
+  4. Reads other collaborators' contribution files
+  5. Creates backdated empty commits mirroring their activity
+  6. Commits and pushes all changes
+
+Syncs are incremental - only new contributions since your last sync are
+processed. If a collaborator's contribution count for a day increases,
+only the delta commits are created.`,
+	Example: `  # Full sync
+  vanity sync
+
+  # Preview what would happen
+  vanity sync --dry-run`,
 	RunE: runSync,
 }
 

@@ -11,8 +11,16 @@ import (
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize vanity in the current repository",
-	Long:  `Creates a .vanity/ directory to store contribution data and sync state.`,
-	RunE:  runInit,
+	Long: `Creates a .vanity/ directory to store contribution data and sync state.
+
+Run this command once in your shared private repository before syncing.
+Each collaborator should clone the repo and run 'vanity sync' to join.`,
+	Example: `  # Initialize in current directory
+  vanity init
+
+  # Then sync your contributions
+  vanity sync`,
+	RunE: runInit,
 }
 
 func runInit(cmd *cobra.Command, args []string) error {

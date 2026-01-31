@@ -48,6 +48,8 @@ brews:
     homepage: "https://github.com/wdm0006/vanity"
     description: "Sync your GitHub contribution graph across multiple accounts"
     license: "MIT"
+    dependencies:
+      - name: gh
     test: |
       system "#{bin}/vanity", "--help"
     install: |
