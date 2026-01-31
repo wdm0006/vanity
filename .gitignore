@@ -1,5 +1,5 @@
 # Binaries
-vanity
+/vanity
 *.exe
 *.exe~
 *.dll
