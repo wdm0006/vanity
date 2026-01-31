@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-01-31
+
+### Added
+
+- `vanity import <username>` - Import contributions from accounts you can't log into (e.g., old work accounts)
+- Full contribution history fetching - imports now retrieve all years, not just the last year
+- `--version` / `-v` flag to display version information
+- Improved help text with examples for all commands
+- Homebrew formula now declares `gh` as a dependency
+
+### Improved
+
+- Better error messages when `gh` CLI is not installed or not authenticated
+- Enhanced command descriptions with usage examples
+
 ## [0.1.0] - 2026-01-31
 
 ### Added
@@ -28,4 +43,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cross-platform binaries (Linux, macOS, Windows)
 - Homebrew tap available at `wdm0006/tap/vanity`
 
+[0.2.0]: https://github.com/wdm0006/vanity/releases/tag/v0.2.0
 [0.1.0]: https://github.com/wdm0006/vanity/releases/tag/v0.1.0
