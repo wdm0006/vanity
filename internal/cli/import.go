@@ -10,6 +10,10 @@ import (
 	"github.com/wmcginnis/vanity/internal/sync"
 )
 
+var (
+	scrapeContributions bool
+)
+
 var importCmd = &cobra.Command{
 	Use:   "import <username>",
 	Short: "Import contributions from another GitHub account",
@@ -20,9 +24,14 @@ This fetches the user's complete public contribution history (all years)
 and saves it to the shared repo. On your next 'vanity sync', you'll create
 mirror commits for their contributions.
 
-Note: This only works for accounts with public contribution data.`,
-	Example: `  # Import full contribution history from an old work account
+By default, this uses the GitHub API which only returns public contributions.
+Use --scrape to fetch all contributions (including private) by scraping the
+profile page directly.`,
+	Example: `  # Import public contributions only (via API)
   vanity import old-work-username
+
+  # Import ALL contributions including private (via scraping)
+  vanity import --scrape old-work-username
 
   # Then sync to create mirror commits
   vanity sync`,
@@ -31,6 +40,7 @@ Note: This only works for accounts with public contribution data.`,
 }
 
 func init() {
+	importCmd.Flags().BoolVar(&scrapeContributions, "scrape", false, "Scrape contribution graph to include private contributions")
 	rootCmd.AddCommand(importCmd)
 }
 
@@ -52,16 +62,28 @@ func runImport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("you're logged in as %s - use 'vanity sync' instead", username)
 	}
 
-	fmt.Printf("Importing full contribution history from %s...\n", username)
+	var contributions []github.Contribution
 
-	// Fetch all contributions for the target user
-	contributions, err := github.FetchAllContributions(username)
-	if err != nil {
-		return fmt.Errorf("failed to fetch contributions for %s: %w", username, err)
+	if scrapeContributions {
+		fmt.Printf("Scraping full contribution history from %s (including private)...\n", username)
+		contributions, err = github.ScrapeAllContributions(username)
+		if err != nil {
+			return fmt.Errorf("failed to scrape contributions for %s: %w", username, err)
+		}
+	} else {
+		fmt.Printf("Importing full contribution history from %s (public only)...\n", username)
+		contributions, err = github.FetchAllContributions(username)
+		if err != nil {
+			return fmt.Errorf("failed to fetch contributions for %s: %w", username, err)
+		}
 	}
 
 	if len(contributions) == 0 {
-		fmt.Printf("No contributions found for %s (profile may be private)\n", username)
+		if scrapeContributions {
+			fmt.Printf("No contributions found for %s\n", username)
+		} else {
+			fmt.Printf("No contributions found for %s (profile may be private - try --scrape)\n", username)
+		}
 		return nil
 	}
 
