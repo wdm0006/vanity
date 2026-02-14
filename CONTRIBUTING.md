@@ -1,8 +1,8 @@
 # Contributing to Vanity
 
-Thanks for your interest in contributing to Vanity!
+Thanks for your interest in contributing!
 
-## Getting Started
+## Getting started
 
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/vanity.git`
@@ -12,87 +12,98 @@ Thanks for your interest in contributing to Vanity!
 6. Commit and push
 7. Open a pull request
 
-## Development Setup
+## Prerequisites
 
-### Prerequisites
+- Go 1.21+
+- [GitHub CLI (`gh`)](https://cli.github.com/) for testing
 
-- Go 1.21 or later
-- GitHub CLI (`gh`) for testing
-
-### Building
+## Building
 
 ```bash
 go build -o vanity ./cmd/vanity
 ```
 
-### Running Checks
+## Running checks
 
-Before submitting a PR, please run:
+Before submitting a PR:
 
 ```bash
-# Format code
-gofmt -w .
-
-# Run linter
-go vet ./...
-
-# Run tests
-go test ./...
-
-# Verify it builds
-go build ./cmd/vanity
+gofmt -w .          # format code
+go vet ./...        # lint
+go test ./...       # tests
+go build ./cmd/vanity  # verify build
 ```
 
-## Code Style
+## Project structure
 
-- Follow standard Go conventions
-- Run `gofmt` before committing
+```
+vanity/
+├── cmd/vanity/
+│   └── main.go              # Entry point
+├── internal/
+│   ├── cli/                 # Cobra command definitions
+│   │   ├── root.go
+│   │   ├── init.go
+│   │   ├── sync.go
+│   │   ├── import.go
+│   │   └── status.go
+│   ├── github/
+│   │   └── contributions.go # GitHub API via gh CLI
+│   ├── git/
+│   │   └── commits.go       # Git operations (commits, push, branches)
+│   └── sync/
+│       ├── engine.go        # Core sync/rebuild logic
+│       └── state.go         # State and contribution data persistence
+├── .goreleaser.yaml
+├── go.mod
+└── go.sum
+```
+
+## Data format
+
+Contribution data is stored in `.vanity/<username>.json`:
+
+```json
+{
+  "username": "alice",
+  "last_updated": "2024-01-15T10:30:00Z",
+  "contributions": [
+    { "date": "2024-01-01", "count": 5 },
+    { "date": "2024-01-02", "count": 3 }
+  ]
+}
+```
+
+Sync state is tracked in `.vanity/<username>-state.json`:
+
+```json
+{
+  "username": "alice",
+  "last_sync": "2024-01-15T10:30:00Z",
+  "mirrored_counts": {
+    "bob": {
+      "2024-01-01": 5,
+      "2024-01-02": 3
+    }
+  }
+}
+```
+
+`mirrored_counts` tracks how many commits have been mirrored per user/date, enabling incremental syncs — only deltas are created.
+
+## Code style
+
+- Standard Go conventions, run `gofmt` before committing
 - Keep functions focused and small
-- Add comments for exported functions
-- Error messages should be lowercase and not end with punctuation
+- Comments on exported functions
+- Lowercase error messages without trailing punctuation
 
-## Commit Messages
+## Commit messages
 
-- Use present tense ("Add feature" not "Added feature")
-- Use imperative mood ("Move cursor to..." not "Moves cursor to...")
-- Keep the first line under 72 characters
+- Present tense, imperative mood ("Add feature" not "Added feature")
+- First line under 72 characters
 - Reference issues when relevant
 
-Examples:
-```
-Add dry-run flag to sync command
+## Reporting bugs
 
-Fix duplicate commits when count increases
-
-Update README with installation instructions
-```
-
-## Pull Requests
-
-- Fill out the PR template
-- Link related issues
-- Keep PRs focused on a single change
-- Add tests for new functionality
-- Update documentation if needed
-
-## Reporting Bugs
-
-When reporting bugs, please include:
-
-- Go version (`go version`)
-- OS and architecture
-- Steps to reproduce
-- Expected vs actual behavior
-- Any error messages
-
-## Feature Requests
-
-Feature requests are welcome! Please:
-
-- Check existing issues first
-- Describe the use case
-- Explain why it would be useful
-
-## Questions?
-
-Open an issue with your question and we'll do our best to help!
+Please include: Go version, OS/arch, steps to reproduce, expected vs actual behavior, and any error messages.
