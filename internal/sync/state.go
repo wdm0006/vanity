@@ -131,6 +131,11 @@ func (s *SyncState) SetMirroredCount(sourceUser, date string, count int) {
 	s.MirroredCounts[sourceUser][date] = count
 }
 
+// ClearAllMirroredCounts resets all mirrored counts so a full rebuild will re-mirror everything
+func (s *SyncState) ClearAllMirroredCounts() {
+	s.MirroredCounts = make(map[string]map[string]int)
+}
+
 // GetTotalMirroredDates returns the count of unique dates mirrored from a user
 func (s *SyncState) GetTotalMirroredDates(sourceUser string) int {
 	userCounts, ok := s.MirroredCounts[sourceUser]

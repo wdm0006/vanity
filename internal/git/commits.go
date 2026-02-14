@@ -81,6 +81,38 @@ func CreateBackdatedCommits(date string, count int, sourceUser string) error {
 	return nil
 }
 
+// ForcePush force-pushes the current branch to the remote, setting upstream tracking
+func ForcePush() error {
+	cmd := exec.Command("git", "push", "--force", "-u", "origin", "HEAD")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// CheckoutOrphan creates a new orphan branch (no history)
+func CheckoutOrphan(branch string) error {
+	cmd := exec.Command("git", "checkout", "--orphan", branch)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// DeleteBranch force-deletes a local branch
+func DeleteBranch(branch string) error {
+	cmd := exec.Command("git", "branch", "-D", branch)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// RenameBranch renames the current branch
+func RenameBranch(newName string) error {
+	cmd := exec.Command("git", "branch", "-M", newName)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 // GetCurrentBranch returns the name of the current branch
 func GetCurrentBranch() (string, error) {
 	cmd := exec.Command("git", "branch", "--show-current")

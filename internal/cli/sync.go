@@ -8,7 +8,9 @@ import (
 )
 
 var (
-	dryRun bool
+	dryRun    bool
+	batchSize int
+	rebuild   bool
 )
 
 var syncCmd = &cobra.Command{
@@ -32,22 +34,33 @@ only the delta commits are created.`,
   vanity sync
 
   # Preview what would happen
-  vanity sync --dry-run`,
+  vanity sync --dry-run
+
+  # Rebuild all mirror commits from scratch (fixes missing contributions)
+  vanity sync --rebuild --batch-size 100`,
 	RunE: runSync,
 }
 
 func init() {
 	syncCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be done without making changes")
+	syncCmd.Flags().IntVar(&batchSize, "batch-size", 100, "Push every N mirror commits (avoids GitHub dropping backdated commits)")
+	syncCmd.Flags().BoolVar(&rebuild, "rebuild", false, "Wipe commit history and rebuild all mirror commits from scratch")
 }
 
 func runSync(cmd *cobra.Command, args []string) error {
-	engine, err := sync.NewEngine()
+	engine, err := sync.NewEngine(
+		sync.WithBatchSize(batchSize),
+		sync.WithRebuild(rebuild),
+	)
 	if err != nil {
 		return err
 	}
 
 	if dryRun {
 		fmt.Println("Dry run mode - no changes will be made")
+	}
+	if rebuild {
+		fmt.Println("Rebuild mode - will wipe commit history and re-mirror everything")
 	}
 
 	return engine.Sync(dryRun)
