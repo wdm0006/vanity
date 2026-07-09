@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/wmcginnis/vanity/internal/cli"
+	"github.com/wdm0006/vanity/internal/cli"
 )
 
 // Set via ldflags at build time

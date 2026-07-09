@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/wmcginnis/vanity/internal/github"
-	"github.com/wmcginnis/vanity/internal/sync"
+	"github.com/wdm0006/vanity/internal/github"
+	"github.com/wdm0006/vanity/internal/sync"
 )
 
 var (
