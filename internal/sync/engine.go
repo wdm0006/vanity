@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/wmcginnis/vanity/internal/git"
-	"github.com/wmcginnis/vanity/internal/github"
+	"github.com/wdm0006/vanity/internal/git"
+	"github.com/wdm0006/vanity/internal/github"
 )
 
 // Engine handles the sync process

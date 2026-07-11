@@ -1,4 +1,4 @@
-module github.com/wmcginnis/vanity
+module github.com/wdm0006/vanity
 
 go 1.21
 
