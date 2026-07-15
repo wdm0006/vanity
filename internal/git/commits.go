@@ -97,6 +97,14 @@ func CheckoutOrphan(branch string) error {
 	return cmd.Run()
 }
 
+// RemoveAllTrackedFiles removes all tracked files from the index and working tree.
+func RemoveAllTrackedFiles() error {
+	cmd := exec.Command("git", "rm", "-rf", "--ignore-unmatch", ".")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 // DeleteBranch force-deletes a local branch
 func DeleteBranch(branch string) error {
 	cmd := exec.Command("git", "branch", "-D", branch)
