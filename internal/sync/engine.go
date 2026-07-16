@@ -186,6 +186,14 @@ func (e *Engine) Sync(dryRun bool) error {
 
 // rebuildHistory creates a fresh orphan branch, preserving .vanity/ data files
 func (e *Engine) rebuildHistory(state *SyncState) error {
+	currentBranch, err := git.GetCurrentBranch()
+	if err != nil {
+		return fmt.Errorf("failed to get current branch: %w", err)
+	}
+	if currentBranch == "" {
+		return fmt.Errorf("cannot rebuild from detached HEAD")
+	}
+
 	// Read all .vanity/ files into memory
 	vanityFiles := make(map[string][]byte)
 	entries, err := os.ReadDir(vanityDir)
@@ -208,6 +216,9 @@ func (e *Engine) rebuildHistory(state *SyncState) error {
 	if err := git.CheckoutOrphan("temp-rebuild"); err != nil {
 		return fmt.Errorf("failed to create orphan branch: %w", err)
 	}
+	if err := git.RemoveAllTrackedFiles(); err != nil {
+		return fmt.Errorf("failed to clear inherited files: %w", err)
+	}
 
 	// Ensure .vanity/ dir exists and write files back
 	if err := os.MkdirAll(vanityDir, 0755); err != nil {
@@ -228,12 +239,12 @@ func (e *Engine) rebuildHistory(state *SyncState) error {
 		return fmt.Errorf("failed to commit rebuild init: %w", err)
 	}
 
-	// Delete old main and rename orphan to main
-	if err := git.DeleteBranch("main"); err != nil {
-		return fmt.Errorf("failed to delete old main: %w", err)
+	// Delete the old branch and rename the orphan branch to replace it
+	if err := git.DeleteBranch(currentBranch); err != nil {
+		return fmt.Errorf("failed to delete old %s branch: %w", currentBranch, err)
 	}
-	if err := git.RenameBranch("main"); err != nil {
-		return fmt.Errorf("failed to rename branch to main: %w", err)
+	if err := git.RenameBranch(currentBranch); err != nil {
+		return fmt.Errorf("failed to rename branch to %s: %w", currentBranch, err)
 	}
 
 	// Clear all mirrored counts so everything gets re-mirrored
