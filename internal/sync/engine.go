@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/wdm0006/vanity/internal/git"
@@ -255,7 +256,7 @@ func (e *Engine) mergeContributions(existing *ContributionData, new []github.Con
 		byDate[c.Date] = c.Count
 	}
 
-	// Convert back to slice
+	// Convert back to slice, sorted by date so the JSON stays stable across syncs
 	var contributions []Contribution
 	for date, count := range byDate {
 		contributions = append(contributions, Contribution{
@@ -263,6 +264,9 @@ func (e *Engine) mergeContributions(existing *ContributionData, new []github.Con
 			Count: count,
 		})
 	}
+	sort.Slice(contributions, func(i, j int) bool {
+		return contributions[i].Date < contributions[j].Date
+	})
 
 	return &ContributionData{
 		Username:      existing.Username,
