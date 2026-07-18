@@ -251,13 +251,26 @@ func ScrapeAllContributions(username string) ([]Contribution, error) {
 	return allContributions, nil
 }
 
+// scrapeClient fetches GitHub profile HTML with an explicit timeout so a
+// stalled connection cannot hang the import indefinitely.
+var scrapeClient = &http.Client{Timeout: 30 * time.Second}
+
 // scrapeContributionsForYear fetches contributions for a specific year by
 // scraping the GitHub contributions page
 func scrapeContributionsForYear(username string, year int) ([]Contribution, error) {
 	url := fmt.Sprintf("https://github.com/users/%s/contributions?from=%d-01-01&to=%d-12-31",
 		username, year, year)
 
-	resp, err := http.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build contributions request: %w", err)
+	}
+	// Identify the client so GitHub does not 403 the default Go user agent, and
+	// pin English so the English-only tooltip regex below stays valid.
+	req.Header.Set("User-Agent", "vanity contribution scraper")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+
+	resp, err := scrapeClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contributions page: %w", err)
 	}
