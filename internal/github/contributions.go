@@ -285,7 +285,30 @@ func scrapeContributionsForYear(username string, year int) ([]Contribution, erro
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	return parseContributionsFromHTML(string(body), year)
+	return parseScrapedContributions(string(body), year)
+}
+
+func parseScrapedContributions(html string, year int) ([]Contribution, error) {
+	contributions, err := parseContributionsFromHTML(html, year)
+	if err != nil {
+		return nil, err
+	}
+	if len(contributions) > 0 {
+		return contributions, nil
+	}
+
+	totalRegex := regexp.MustCompile(fmt.Sprintf(`([\d,]+) contributions? in %d`, year))
+	match := totalRegex.FindStringSubmatch(html)
+	if len(match) != 2 {
+		return contributions, nil
+	}
+
+	total, err := strconv.Atoi(strings.ReplaceAll(match[1], ",", ""))
+	if err != nil || total == 0 {
+		return contributions, nil
+	}
+
+	return nil, fmt.Errorf("scraped contribution page for %d parsed 0 days but reports %d contributions — GitHub markup may have changed", year, total)
 }
 
 // parseContributionsFromHTML extracts contribution data from the HTML
