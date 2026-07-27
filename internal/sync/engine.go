@@ -108,11 +108,8 @@ func (e *Engine) Sync(dryRun bool) error {
 	fmt.Printf("  Updated %s.json with %d total contribution days\n", e.username, len(contribData.Contributions))
 
 	// Step 4.5: Rebuild — wipe commit history, keep .vanity/ data
-	if e.rebuild && !dryRun {
-		fmt.Println("\nRebuilding commit history...")
-		if err := e.rebuildHistory(state); err != nil {
-			return fmt.Errorf("rebuild failed: %w", err)
-		}
+	if err := e.prepareRebuild(state, dryRun); err != nil {
+		return fmt.Errorf("rebuild failed: %w", err)
 	}
 
 	// Step 5: Mirror other users' contributions
@@ -182,6 +179,25 @@ func (e *Engine) Sync(dryRun bool) error {
 
 	fmt.Println("\nSync complete!")
 	return nil
+}
+
+// prepareRebuild puts the state into rebuild mode before the mirror loop runs.
+// A dry run only clears the in-memory mirrored counts, so the preview reports the
+// full re-mirror a real rebuild would perform; nothing is persisted because
+// SaveSyncState is skipped on dry runs.
+func (e *Engine) prepareRebuild(state *SyncState, dryRun bool) error {
+	if !e.rebuild {
+		return nil
+	}
+
+	if dryRun {
+		fmt.Println("\nRebuild would wipe commit history and re-mirror everything...")
+		state.ClearAllMirroredCounts()
+		return nil
+	}
+
+	fmt.Println("\nRebuilding commit history...")
+	return e.rebuildHistory(state)
 }
 
 // rebuildHistory creates a fresh orphan branch, preserving .vanity/ data files
