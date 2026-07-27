@@ -143,6 +143,69 @@ func TestDryRunRebuildPreviewsEveryStoredContribution(t *testing.T) {
 	}
 }
 
+func TestMirrorUserCreatesOnlyBackdatedDeltas(t *testing.T) {
+	repo := initTestRepo(t, "main")
+	writeTestFile(t, repo, ".vanity/bob.json",
+		`{"username":"bob","contributions":[{"date":"2024-01-02","count":2},{"date":"2024-03-04","count":1}]}`)
+
+	state := &SyncState{Username: "alice"}
+	engine := &Engine{username: "alice"}
+	batchCount := 0
+
+	withWorkingDirectory(t, repo, func() {
+		mirrored, err := engine.mirrorUser("bob", state, false, &batchCount)
+		if err != nil {
+			t.Fatalf("first mirrorUser() error = %v", err)
+		}
+		if mirrored != 3 {
+			t.Fatalf("first mirrorUser() mirrored %d commits, want 3", mirrored)
+		}
+		if got := runGit(t, repo, "rev-list", "--count", "HEAD"); got != "3" {
+			t.Fatalf("commit count after first mirror = %s, want 3", got)
+		}
+
+		dates := strings.Fields(runGit(t, repo, "log", "--format=%ad", "--date=short"))
+		wantDates := []string{"2024-03-04", "2024-01-02", "2024-01-02"}
+		if strings.Join(dates, ",") != strings.Join(wantDates, ",") {
+			t.Fatalf("author dates = %v, want %v", dates, wantDates)
+		}
+
+		mirrored, err = engine.mirrorUser("bob", state, false, &batchCount)
+		if err != nil {
+			t.Fatalf("second mirrorUser() error = %v", err)
+		}
+		if mirrored != 0 {
+			t.Fatalf("second mirrorUser() mirrored %d commits, want 0", mirrored)
+		}
+		if got := runGit(t, repo, "rev-list", "--count", "HEAD"); got != "3" {
+			t.Fatalf("commit count after second mirror = %s, want 3", got)
+		}
+
+		writeTestFile(t, repo, ".vanity/bob.json",
+			`{"username":"bob","contributions":[{"date":"2024-01-02","count":4},{"date":"2024-03-04","count":1}]}`)
+		mirrored, err = engine.mirrorUser("bob", state, false, &batchCount)
+		if err != nil {
+			t.Fatalf("incremental mirrorUser() error = %v", err)
+		}
+		if mirrored != 2 {
+			t.Fatalf("incremental mirrorUser() mirrored %d commits, want 2", mirrored)
+		}
+		if got := runGit(t, repo, "rev-list", "--count", "HEAD"); got != "5" {
+			t.Fatalf("commit count after incremental mirror = %s, want 5", got)
+		}
+	})
+
+	if got := state.GetMirroredCount("bob", "2024-01-02"); got != 4 {
+		t.Errorf("mirrored count for 2024-01-02 = %d, want 4", got)
+	}
+	if got := state.GetMirroredCount("bob", "2024-03-04"); got != 1 {
+		t.Errorf("mirrored count for 2024-03-04 = %d, want 1", got)
+	}
+	if batchCount != 5 {
+		t.Errorf("batch count = %d, want 5", batchCount)
+	}
+}
+
 // previewMirror runs the dry-run rebuild preparation and mirror preview the way Sync does,
 // returning the number of commits previewed and everything printed while doing so.
 func previewMirror(t *testing.T, e *Engine, state *SyncState) (int, string) {
