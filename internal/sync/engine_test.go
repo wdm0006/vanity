@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -204,6 +205,109 @@ func TestMirrorUserCreatesOnlyBackdatedDeltas(t *testing.T) {
 	if batchCount != 5 {
 		t.Errorf("batch count = %d, want 5", batchCount)
 	}
+}
+
+func TestMirrorAllUsersSucceedsWhenEverySourceMirrors(t *testing.T) {
+	repo := initTestRepo(t, "main")
+	writeTestFile(t, repo, ".vanity/alice.json",
+		`{"username":"alice","contributions":[{"date":"2024-05-05","count":1}]}`)
+	writeTestFile(t, repo, ".vanity/bob.json",
+		`{"username":"bob","contributions":[{"date":"2024-01-02","count":2}]}`)
+	writeTestFile(t, repo, ".vanity/carol.json",
+		`{"username":"carol","contributions":[{"date":"2024-02-03","count":1}]}`)
+
+	state := &SyncState{Username: "alice"}
+	batchCount := 0
+	var mirrored int
+	var err error
+	withWorkingDirectory(t, repo, func() {
+		mirrored, err = (&Engine{username: "alice"}).mirrorAllUsers(
+			[]string{"alice", "bob", "carol"}, state, false, &batchCount)
+	})
+
+	if err != nil {
+		t.Fatalf("mirrorAllUsers() error = %v, want nil", err)
+	}
+	if mirrored != 3 {
+		t.Errorf("mirrored %d commits, want 3", mirrored)
+	}
+	// The current user is never mirrored onto themselves.
+	dates := strings.Fields(runGit(t, repo, "log", "--format=%ad", "--date=short"))
+	wantDates := []string{"2024-02-03", "2024-01-02", "2024-01-02"}
+	if strings.Join(dates, ",") != strings.Join(wantDates, ",") {
+		t.Errorf("author dates = %v, want %v", dates, wantDates)
+	}
+}
+
+func TestMirrorAllUsersReportsFailedSourcesAndKeepsGoing(t *testing.T) {
+	repo := initTestRepo(t, "main")
+	writeTestFile(t, repo, ".vanity/bob.json",
+		`{"username":"bob","contributions":[{"date":"2024-01-02","count":2}]}`)
+	writeTestFile(t, repo, ".vanity/carol.json",
+		`{"username":"carol","contributions":[{"date":"2024-02-03","count":1}]}`)
+	// Reject bob's first mirror commit; every later commit (carol's) succeeds.
+	failNthCommit(t, repo, 1)
+
+	state := &SyncState{Username: "alice"}
+	batchCount := 0
+	var mirrored int
+	var err error
+	withWorkingDirectory(t, repo, func() {
+		mirrored, err = (&Engine{username: "alice"}).mirrorAllUsers(
+			[]string{"bob", "carol"}, state, false, &batchCount)
+	})
+
+	if err == nil {
+		t.Fatal("mirrorAllUsers() error = nil, want an error naming the failed source")
+	}
+	if !strings.Contains(err.Error(), "bob") {
+		t.Errorf("error %q does not name the failed source bob", err)
+	}
+	if strings.Contains(err.Error(), "carol") {
+		t.Errorf("error %q names carol, which mirrored successfully", err)
+	}
+	if want := "failed to mirror 1 of 2 source accounts"; !strings.Contains(err.Error(), want) {
+		t.Errorf("error %q does not summarize the failure as %q", err, want)
+	}
+
+	// The failure must not abandon the remaining sources.
+	if mirrored != 1 {
+		t.Errorf("mirrored %d commits, want 1 (carol's)", mirrored)
+	}
+	dates := strings.Fields(runGit(t, repo, "log", "--format=%ad", "--date=short"))
+	if strings.Join(dates, ",") != "2024-02-03" {
+		t.Errorf("author dates = %v, want only carol's 2024-02-03", dates)
+	}
+	if got := state.GetMirroredCount("carol", "2024-02-03"); got != 1 {
+		t.Errorf("mirrored count for carol = %d, want 1", got)
+	}
+	if got := state.GetMirroredCount("bob", "2024-01-02"); got != 0 {
+		t.Errorf("mirrored count for bob = %d, want 0", got)
+	}
+}
+
+// failNthCommit installs a pre-commit hook that rejects the nth commit attempt in the
+// repository and allows every other one, so a single mirror commit fails deterministically.
+func failNthCommit(t *testing.T, repo string, n int) {
+	t.Helper()
+	hooksDir := filepath.Join(t.TempDir(), "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		t.Fatalf("create hooks directory: %v", err)
+	}
+	counter := filepath.Join(hooksDir, "attempts")
+	script := fmt.Sprintf(`#!/bin/sh
+count=$(cat %q 2>/dev/null || echo 0)
+count=$((count + 1))
+echo "$count" > %q
+if [ "$count" -eq %d ]; then
+	exit 1
+fi
+exit 0
+`, counter, counter, n)
+	if err := os.WriteFile(filepath.Join(hooksDir, "pre-commit"), []byte(script), 0755); err != nil {
+		t.Fatalf("write pre-commit hook: %v", err)
+	}
+	runGit(t, repo, "config", "core.hooksPath", hooksDir)
 }
 
 // previewMirror runs the dry-run rebuild preparation and mirror preview the way Sync does,

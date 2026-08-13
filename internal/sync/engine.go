@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -118,20 +119,8 @@ func (e *Engine) Sync(dryRun bool) error {
 		return fmt.Errorf("failed to list synced users: %w", err)
 	}
 
-	totalMirrored := 0
 	batchCount := 0
-	for _, user := range users {
-		if user == e.username {
-			continue
-		}
-
-		mirrored, err := e.mirrorUser(user, state, dryRun, &batchCount)
-		if err != nil {
-			fmt.Printf("Warning: failed to mirror %s: %v\n", user, err)
-			continue
-		}
-		totalMirrored += mirrored
-	}
+	totalMirrored, mirrorErr := e.mirrorAllUsers(users, state, dryRun, &batchCount)
 
 	if totalMirrored > 0 {
 		fmt.Printf("\nCreated %d mirror commits\n", totalMirrored)
@@ -177,8 +166,46 @@ func (e *Engine) Sync(dryRun bool) error {
 		}
 	}
 
+	// State, commits and pushes above still happen on a partial failure, so the
+	// mirror commits that were created are recorded and the next run resumes from
+	// there. The run itself is not a success: report it and exit non-zero.
+	if mirrorErr != nil {
+		fmt.Printf("\nSync incomplete: %v\n", mirrorErr)
+		return mirrorErr
+	}
+
 	fmt.Println("\nSync complete!")
 	return nil
+}
+
+// mirrorAllUsers mirrors every stored source account other than the current user.
+// A source that fails is warned about and skipped so the remaining sources are
+// still attempted; the returned error names every source that failed.
+func (e *Engine) mirrorAllUsers(users []string, state *SyncState, dryRun bool, batchCount *int) (int, error) {
+	totalMirrored := 0
+	attempted := 0
+	var failures []error
+
+	for _, user := range users {
+		if user == e.username {
+			continue
+		}
+		attempted++
+
+		mirrored, err := e.mirrorUser(user, state, dryRun, batchCount)
+		if err != nil {
+			fmt.Printf("Warning: failed to mirror %s: %v\n", user, err)
+			failures = append(failures, fmt.Errorf("%s: %w", user, err))
+			continue
+		}
+		totalMirrored += mirrored
+	}
+
+	if len(failures) > 0 {
+		return totalMirrored, fmt.Errorf("failed to mirror %d of %d source accounts: %w",
+			len(failures), attempted, errors.Join(failures...))
+	}
+	return totalMirrored, nil
 }
 
 // prepareRebuild puts the state into rebuild mode before the mirror loop runs.
