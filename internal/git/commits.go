@@ -66,8 +66,9 @@ func CreateBackdatedCommit(date string, message string) error {
 }
 
 // CreateBackdatedCommits creates multiple empty commits for a given date
-// count specifies how many commits to create
-func CreateBackdatedCommits(date string, count int, sourceUser string) error {
+// count specifies how many commits to create. It returns how many commits were
+// actually created, so callers can record partial progress when one fails.
+func CreateBackdatedCommits(date string, count int, sourceUser string) (int, error) {
 	for i := 0; i < count; i++ {
 		// Spread commits throughout the day to make them look more natural
 		hour := (i * 2) % 24
@@ -75,10 +76,10 @@ func CreateBackdatedCommits(date string, count int, sourceUser string) error {
 		message := fmt.Sprintf("vanity: mirror from %s (%d/%d)", sourceUser, i+1, count)
 
 		if err := CreateBackdatedCommit(timestamp, message); err != nil {
-			return fmt.Errorf("failed to create commit %d/%d: %w", i+1, count, err)
+			return i, fmt.Errorf("failed to create commit %d/%d: %w", i+1, count, err)
 		}
 	}
-	return nil
+	return count, nil
 }
 
 // ForcePush force-pushes the current branch to the remote, setting upstream tracking
