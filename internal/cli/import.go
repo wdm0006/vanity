@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -87,16 +88,7 @@ func runImport(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Convert to sync.Contribution type
-	var syncContribs []sync.Contribution
-	totalCount := 0
-	for _, c := range contributions {
-		syncContribs = append(syncContribs, sync.Contribution{
-			Date:  c.Date,
-			Count: c.Count,
-		})
-		totalCount += c.Count
-	}
+	syncContribs, totalCount := sortedContributions(contributions)
 
 	// Save to contribution file
 	contribData := &sync.ContributionData{
@@ -115,4 +107,22 @@ func runImport(cmd *cobra.Command, args []string) error {
 	fmt.Println("  2. Run 'vanity sync' to create mirror commits")
 
 	return nil
+}
+
+func sortedContributions(contributions []github.Contribution) ([]sync.Contribution, int) {
+	var syncContribs []sync.Contribution
+	totalCount := 0
+	for _, c := range contributions {
+		syncContribs = append(syncContribs, sync.Contribution{
+			Date:  c.Date,
+			Count: c.Count,
+		})
+		totalCount += c.Count
+	}
+
+	sort.Slice(syncContribs, func(i, j int) bool {
+		return syncContribs[i].Date < syncContribs[j].Date
+	})
+
+	return syncContribs, totalCount
 }
