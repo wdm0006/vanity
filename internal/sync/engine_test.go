@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -309,6 +310,145 @@ exit 0
 		t.Fatalf("write pre-commit hook: %v", err)
 	}
 	runGit(t, repo, "config", "core.hooksPath", hooksDir)
+}
+
+func TestMirrorUserCheckpointsPartialDailyBatch(t *testing.T) {
+	repo := initTestRepo(t, "main")
+	writeTestFile(t, repo, ".vanity/bob.json",
+		`{"username":"bob","contributions":[{"date":"2024-01-02","count":3},{"date":"2024-03-04","count":1}]}`)
+	failOnCommit(t, repo, 2)
+
+	state := &SyncState{Username: "alice"}
+	engine := &Engine{username: "alice"}
+	batchCount := 0
+
+	withWorkingDirectory(t, repo, func() {
+		mirrored, err := engine.mirrorUser("bob", state, false, &batchCount)
+		if err == nil {
+			t.Fatalf("mirrorUser() error = nil, want the second commit to fail")
+		}
+		if mirrored != 1 {
+			t.Fatalf("mirrorUser() mirrored %d commits, want 1", mirrored)
+		}
+		if got := commitCount(t, repo); got != 1 {
+			t.Fatalf("commit count after partial batch = %d, want 1", got)
+		}
+		if got := state.GetMirroredCount("bob", "2024-01-02"); got != 1 {
+			t.Fatalf("mirrored count for 2024-01-02 = %d, want 1", got)
+		}
+		if got := state.GetMirroredCount("bob", "2024-03-04"); got != 0 {
+			t.Fatalf("mirrored count for 2024-03-04 = %d, want 0", got)
+		}
+		if batchCount != 1 {
+			t.Fatalf("batch count after partial batch = %d, want 1", batchCount)
+		}
+
+		allowAllCommits(t, repo)
+
+		mirrored, err = engine.mirrorUser("bob", state, false, &batchCount)
+		if err != nil {
+			t.Fatalf("retry mirrorUser() error = %v", err)
+		}
+		if mirrored != 3 {
+			t.Fatalf("retry mirrorUser() mirrored %d commits, want 3", mirrored)
+		}
+	})
+
+	if got := commitCount(t, repo); got != 4 {
+		t.Fatalf("commit count after retry = %d, want 4", got)
+	}
+	dates := strings.Fields(runGit(t, repo, "log", "--format=%ad", "--date=short"))
+	byDate := map[string]int{}
+	for _, date := range dates {
+		byDate[date]++
+	}
+	if byDate["2024-01-02"] != 3 || byDate["2024-03-04"] != 1 {
+		t.Fatalf("commits per date = %v, want 3 on 2024-01-02 and 1 on 2024-03-04", byDate)
+	}
+	for _, message := range strings.Split(runGit(t, repo, "log", "--format=%s"), "\n") {
+		if !strings.HasPrefix(message, "vanity: mirror from bob ") {
+			t.Fatalf("unexpected commit message %q", message)
+		}
+	}
+	if got := state.GetMirroredCount("bob", "2024-01-02"); got != 3 {
+		t.Errorf("mirrored count for 2024-01-02 = %d, want 3", got)
+	}
+	if got := state.GetMirroredCount("bob", "2024-03-04"); got != 1 {
+		t.Errorf("mirrored count for 2024-03-04 = %d, want 1", got)
+	}
+	if batchCount != 4 {
+		t.Errorf("batch count = %d, want 4", batchCount)
+	}
+}
+
+func TestMirrorUserKeepsCountWhenFirstCommitFails(t *testing.T) {
+	repo := initTestRepo(t, "main")
+	writeTestFile(t, repo, ".vanity/bob.json",
+		`{"username":"bob","contributions":[{"date":"2024-01-02","count":3}]}`)
+	failOnCommit(t, repo, 1)
+
+	state := &SyncState{Username: "alice"}
+	state.SetMirroredCount("bob", "2024-01-02", 1)
+	engine := &Engine{username: "alice"}
+	batchCount := 0
+
+	withWorkingDirectory(t, repo, func() {
+		mirrored, err := engine.mirrorUser("bob", state, false, &batchCount)
+		if err == nil {
+			t.Fatalf("mirrorUser() error = nil, want the first commit to fail")
+		}
+		if mirrored != 0 {
+			t.Fatalf("mirrorUser() mirrored %d commits, want 0", mirrored)
+		}
+	})
+
+	if got := commitCount(t, repo); got != 0 {
+		t.Errorf("commit count = %d, want 0", got)
+	}
+	if got := state.GetMirroredCount("bob", "2024-01-02"); got != 1 {
+		t.Errorf("mirrored count for 2024-01-02 = %d, want it left at 1", got)
+	}
+	if batchCount != 0 {
+		t.Errorf("batch count = %d, want 0", batchCount)
+	}
+}
+
+// failOnCommit installs a pre-commit hook that rejects the nth commit attempted in repo.
+func failOnCommit(t *testing.T, repo string, n int) {
+	t.Helper()
+	hooks := filepath.Join(repo, "testhooks")
+	if err := os.MkdirAll(hooks, 0755); err != nil {
+		t.Fatalf("create hooks directory: %v", err)
+	}
+	script := fmt.Sprintf(`#!/bin/sh
+counter="$(dirname "$0")/attempts"
+attempts=$(cat "$counter" 2>/dev/null || echo 0)
+attempts=$((attempts + 1))
+echo "$attempts" > "$counter"
+[ "$attempts" -eq %d ] && exit 1
+exit 0
+`, n)
+	if err := os.WriteFile(filepath.Join(hooks, "pre-commit"), []byte(script), 0755); err != nil {
+		t.Fatalf("write pre-commit hook: %v", err)
+	}
+	runGit(t, repo, "config", "core.hooksPath", hooks)
+}
+
+// allowAllCommits removes any hook installed by failOnCommit.
+func allowAllCommits(t *testing.T, repo string) {
+	t.Helper()
+	if err := os.Remove(filepath.Join(repo, "testhooks", "pre-commit")); err != nil {
+		t.Fatalf("remove pre-commit hook: %v", err)
+	}
+}
+
+func commitCount(t *testing.T, repo string) int {
+	t.Helper()
+	count, err := strconv.Atoi(runGit(t, repo, "rev-list", "--count", "--all"))
+	if err != nil {
+		t.Fatalf("parse commit count: %v", err)
+	}
+	return count
 }
 
 // previewMirror runs the dry-run rebuild preparation and mirror preview the way Sync does,

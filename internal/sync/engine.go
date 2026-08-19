@@ -392,7 +392,15 @@ func (e *Engine) mirrorUser(sourceUser string, state *SyncState, dryRun bool, ba
 			fmt.Printf("  Would create %d commits for %s from %s (had %d, now %d)\n",
 				delta, contrib.Date, sourceUser, alreadyMirrored, contrib.Count)
 		} else {
-			if err := git.CreateBackdatedCommits(contrib.Date, delta, sourceUser); err != nil {
+			created, err := git.CreateBackdatedCommits(contrib.Date, delta, sourceUser)
+			if err != nil {
+				// Checkpoint whatever landed in history so a retry mirrors only the
+				// remaining delta instead of duplicating these commits.
+				if created > 0 {
+					state.SetMirroredCount(sourceUser, contrib.Date, alreadyMirrored+created)
+					mirrored += created
+					*batchCount += created
+				}
 				return mirrored, fmt.Errorf("failed to create commits for %s: %w", contrib.Date, err)
 			}
 		}
