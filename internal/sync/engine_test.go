@@ -356,7 +356,6 @@ func captureStdout(t *testing.T, fn func()) string {
 func TestRebuildHistoryPreservesOnlyVanityFilesOnCurrentBranch(t *testing.T) {
 	repo := initTestRepo(t, "feature")
 	writeTestFile(t, repo, ".vanity/alice.json", `{"username":"alice"}`)
-	writeTestFile(t, repo, "app.txt", "unrelated")
 	runGit(t, repo, "add", ".")
 	runGit(t, repo, "commit", "-m", "initial")
 
@@ -378,6 +377,71 @@ func TestRebuildHistoryPreservesOnlyVanityFilesOnCurrentBranch(t *testing.T) {
 	}
 	if files := strings.Fields(runGit(t, repo, "ls-tree", "-r", "--name-only", "HEAD")); len(files) != 1 || files[0] != ".vanity/alice.json" {
 		t.Fatalf("rebuilt tree files = %v, want only .vanity/alice.json", files)
+	}
+}
+
+func TestRebuildHistoryRefusesTrackedFilesOutsideVanity(t *testing.T) {
+	repo := initTestRepo(t, "feature")
+	writeTestFile(t, repo, ".vanity/alice.json", `{"username":"alice"}`)
+	writeTestFile(t, repo, "README.md", "docs")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "initial")
+	originalHead := runGit(t, repo, "rev-parse", "HEAD")
+	originalTree := runGit(t, repo, "ls-tree", "-r", "--name-only", "HEAD")
+
+	state := &SyncState{MirroredCounts: map[string]map[string]int{"bob": {"2024-01-01": 1}}}
+	withWorkingDirectory(t, repo, func() {
+		err := (&Engine{}).rebuildHistory(state)
+		if err == nil {
+			t.Fatal("rebuildHistory() error = nil, want refusal")
+		}
+		if !strings.Contains(err.Error(), "README.md") {
+			t.Fatalf("rebuildHistory() error = %v, want it to name README.md", err)
+		}
+		if !strings.Contains(err.Error(), "dedicated sync repository") {
+			t.Fatalf("rebuildHistory() error = %v, want it to require a dedicated sync repository", err)
+		}
+	})
+
+	if got := state.GetMirroredCount("bob", "2024-01-01"); got != 1 {
+		t.Fatalf("mirrored count = %d, want the refused rebuild to leave state alone", got)
+	}
+	if head := runGit(t, repo, "rev-parse", "HEAD"); head != originalHead {
+		t.Fatalf("HEAD changed from %s to %s", originalHead, head)
+	}
+	if branch := runGit(t, repo, "branch", "--show-current"); branch != "feature" {
+		t.Fatalf("current branch = %q, want feature", branch)
+	}
+	if branches := runGit(t, repo, "branch", "--list", "temp-rebuild"); branches != "" {
+		t.Fatalf("temporary rebuild branch was created: %q", branches)
+	}
+	if status := runGit(t, repo, "status", "--porcelain"); status != "" {
+		t.Fatalf("index or working tree was modified: %q", status)
+	}
+	if tree := runGit(t, repo, "ls-tree", "-r", "--name-only", "HEAD"); tree != originalTree {
+		t.Fatalf("tracked tree = %q, want %q", tree, originalTree)
+	}
+	if contents, err := os.ReadFile(filepath.Join(repo, "README.md")); err != nil || string(contents) != "docs" {
+		t.Fatalf("README.md = %q, %v; want it left on disk untouched", contents, err)
+	}
+}
+
+func TestRebuildHistoryClassifiesVanityPrefixedPathsStructurally(t *testing.T) {
+	repo := initTestRepo(t, "feature")
+	writeTestFile(t, repo, ".vanity/alice.json", `{"username":"alice"}`)
+	writeTestFile(t, repo, ".vanity-backup/alice.json", `{"username":"alice"}`)
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "initial")
+
+	withWorkingDirectory(t, repo, func() {
+		err := (&Engine{}).rebuildHistory(&SyncState{})
+		if err == nil || !strings.Contains(err.Error(), ".vanity-backup/alice.json") {
+			t.Fatalf("rebuildHistory() error = %v, want .vanity-backup/alice.json treated as outside .vanity/", err)
+		}
+	})
+
+	if branches := runGit(t, repo, "branch", "--list", "temp-rebuild"); branches != "" {
+		t.Fatalf("temporary rebuild branch was created: %q", branches)
 	}
 }
 

@@ -78,7 +78,7 @@ vanity sync
 
 `--batch-size` exists because GitHub's contribution indexer can drop older backdated commits when too many are pushed at once. Pushing in smaller batches avoids this.
 
-`--rebuild` is useful when contributions are missing from the graph. It creates a fresh orphan branch, re-mirrors all contributions with batch pushing, and force-pushes.
+`--rebuild` is useful when contributions are missing from the graph. It creates a fresh orphan branch, re-mirrors all contributions with batch pushing, and force-pushes. The rebuilt branch keeps only `.vanity/`, so `--rebuild` refuses to run in a repository that tracks anything else and names the offending paths — it is only safe in a repository dedicated to syncing.
 
 ## How it works
 

@@ -6,11 +6,15 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/wdm0006/vanity/internal/git"
 	"github.com/wdm0006/vanity/internal/github"
 )
+
+// maxReportedTrackedPaths caps how many offending paths a rebuild refusal lists.
+const maxReportedTrackedPaths = 10
 
 // Engine handles the sync process
 type Engine struct {
@@ -227,6 +231,36 @@ func (e *Engine) prepareRebuild(state *SyncState, dryRun bool) error {
 	return e.rebuildHistory(state)
 }
 
+// ensureDedicatedSyncRepo refuses a rebuild when the repository tracks anything
+// outside .vanity/. Rebuild removes every tracked file before restoring the
+// metadata, so it is only safe in a repository dedicated to syncing.
+func ensureDedicatedSyncRepo() error {
+	tracked, err := git.ListTrackedFiles()
+	if err != nil {
+		return fmt.Errorf("failed to list tracked files: %w", err)
+	}
+
+	var outside []string
+	for _, path := range tracked {
+		if path == vanityDir || strings.HasPrefix(path, vanityDir+"/") {
+			continue
+		}
+		outside = append(outside, path)
+	}
+	if len(outside) == 0 {
+		return nil
+	}
+
+	listed := outside
+	suffix := ""
+	if len(listed) > maxReportedTrackedPaths {
+		listed = listed[:maxReportedTrackedPaths]
+		suffix = fmt.Sprintf(", and %d more", len(outside)-maxReportedTrackedPaths)
+	}
+	return fmt.Errorf("rebuild requires a dedicated sync repository, but %d tracked path(s) are outside %s/: %s%s",
+		len(outside), vanityDir, strings.Join(listed, ", "), suffix)
+}
+
 // rebuildHistory creates a fresh orphan branch, preserving .vanity/ data files
 func (e *Engine) rebuildHistory(state *SyncState) error {
 	currentBranch, err := git.GetCurrentBranch()
@@ -235,6 +269,10 @@ func (e *Engine) rebuildHistory(state *SyncState) error {
 	}
 	if currentBranch == "" {
 		return fmt.Errorf("cannot rebuild from detached HEAD")
+	}
+
+	if err := ensureDedicatedSyncRepo(); err != nil {
+		return err
 	}
 
 	// Read all .vanity/ files into memory
