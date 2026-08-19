@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -451,4 +452,150 @@ func withWorkingDirectory(t *testing.T, dir string, fn func()) {
 		}
 	}()
 	fn()
+}
+
+func TestSyncAbortsBeforeMutationWhenPullFails(t *testing.T) {
+	repo := initSyncRepo(t, true)
+	ghMarker := stubGitHubCLI(t)
+	before := snapshotRepo(t, repo)
+
+	var err error
+	withWorkingDirectory(t, repo, func() {
+		silenceStderr(t)
+		captureStdout(t, func() {
+			err = (&Engine{username: "alice", batchSize: 100}).Sync(false)
+		})
+	})
+
+	if err == nil {
+		t.Fatal("Sync() error = nil, want the git pull failure")
+	}
+	if !strings.Contains(err.Error(), "git pull failed") {
+		t.Fatalf("Sync() error = %v, want it to identify the pull failure", err)
+	}
+	if _, statErr := os.Stat(ghMarker); statErr == nil {
+		t.Error("Sync() fetched from GitHub after the pull failed")
+	}
+	if after := snapshotRepo(t, repo); !reflect.DeepEqual(after, before) {
+		t.Errorf("repository mutated after the failed pull:\nbefore = %+v\nafter  = %+v", before, after)
+	}
+}
+
+func TestSyncModesThatSkipThePull(t *testing.T) {
+	tests := []struct {
+		name         string
+		brokenRemote bool
+		rebuild      bool
+		dryRun       bool
+	}{
+		{name: "dry run", brokenRemote: true, dryRun: true},
+		{name: "rebuild", brokenRemote: true, rebuild: true},
+		{name: "no remote", brokenRemote: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := initSyncRepo(t, tt.brokenRemote)
+			ghMarker := stubGitHubCLI(t)
+
+			var err error
+			withWorkingDirectory(t, repo, func() {
+				silenceStderr(t)
+				captureStdout(t, func() {
+					err = (&Engine{username: "alice", batchSize: 100, rebuild: tt.rebuild}).Sync(tt.dryRun)
+				})
+			})
+
+			// The remote is unusable, so reaching the GitHub fetch at all is what proves
+			// step 1 was skipped rather than attempted.
+			if _, statErr := os.Stat(ghMarker); statErr != nil {
+				t.Fatalf("Sync() never reached the GitHub fetch: %v (error was %v)", statErr, err)
+			}
+			if err == nil || !strings.Contains(err.Error(), "failed to fetch contributions") {
+				t.Fatalf("Sync() error = %v, want the stubbed GitHub fetch failure", err)
+			}
+		})
+	}
+}
+
+// initSyncRepo builds a repository with committed .vanity/ data for alice and bob.
+// With brokenRemote it also configures an origin that does not exist, so
+// `git pull --rebase` fails locally without touching the network.
+func initSyncRepo(t *testing.T, brokenRemote bool) string {
+	t.Helper()
+	repo := initTestRepo(t, "main")
+	writeTestFile(t, repo, ".vanity/alice.json", `{"username":"alice","contributions":[{"date":"2024-01-01","count":3}]}`)
+	writeTestFile(t, repo, ".vanity/bob.json", `{"username":"bob","contributions":[{"date":"2024-01-02","count":2}]}`)
+	writeTestFile(t, repo, ".vanity/alice-state.json",
+		`{"username":"alice","last_sync":"2024-01-05T00:00:00Z","mirrored_counts":{"bob":{"2024-01-02":2}}}`)
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "initial")
+	if brokenRemote {
+		runGit(t, repo, "remote", "add", "origin", filepath.Join(repo, "missing-remote.git"))
+	}
+	return repo
+}
+
+// stubGitHubCLI puts a failing gh at the front of PATH and returns the path of the
+// marker file it writes when invoked, so a test can tell whether Sync reached the
+// GitHub fetch.
+func stubGitHubCLI(t *testing.T) string {
+	t.Helper()
+	binDir := t.TempDir()
+	marker := filepath.Join(binDir, "invoked")
+	script := fmt.Sprintf(`#!/bin/sh
+echo "$@" >> %q
+echo "stub gh: no network in tests" >&2
+exit 1
+`, marker)
+	if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(script), 0755); err != nil {
+		t.Fatalf("write gh stub: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return marker
+}
+
+// repoSnapshot captures the repository state a failed sync must leave untouched.
+type repoSnapshot struct {
+	Head    string
+	Commits string
+	Vanity  map[string]string
+}
+
+func snapshotRepo(t *testing.T, repo string) repoSnapshot {
+	t.Helper()
+	snapshot := repoSnapshot{
+		Head:    runGit(t, repo, "rev-parse", "HEAD"),
+		Commits: runGit(t, repo, "rev-list", "--count", "--all"),
+		Vanity:  make(map[string]string),
+	}
+	entries, err := os.ReadDir(filepath.Join(repo, vanityDir))
+	if err != nil {
+		t.Fatalf("read %s: %v", vanityDir, err)
+	}
+	for _, entry := range entries {
+		contents, err := os.ReadFile(filepath.Join(repo, vanityDir, entry.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", entry.Name(), err)
+		}
+		snapshot.Vanity[entry.Name()] = string(contents)
+	}
+	return snapshot
+}
+
+// silenceStderr keeps the deliberate git and gh failures out of the test log.
+func silenceStderr(t *testing.T) {
+	t.Helper()
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open %s: %v", os.DevNull, err)
+	}
+	original := os.Stderr
+	os.Stderr = devNull
+	t.Cleanup(func() {
+		os.Stderr = original
+		if err := devNull.Close(); err != nil {
+			t.Errorf("close %s: %v", os.DevNull, err)
+		}
+	})
 }
