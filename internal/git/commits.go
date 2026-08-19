@@ -140,3 +140,21 @@ func HasUncommittedChanges() bool {
 	}
 	return len(strings.TrimSpace(string(output))) > 0
 }
+
+// ListTrackedFiles returns every path in the index, relative to the repository
+// root and separated by NUL so paths with unusual characters survive intact.
+func ListTrackedFiles() ([]string, error) {
+	cmd := exec.Command("git", "ls-files", "-z")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	var paths []string
+	for _, path := range strings.Split(string(output), "\x00") {
+		if path != "" {
+			paths = append(paths, path)
+		}
+	}
+	return paths, nil
+}
