@@ -67,12 +67,15 @@ func NewEngine(opts ...Option) (*Engine, error) {
 func (e *Engine) Sync(dryRun bool) error {
 	fmt.Printf("Syncing as %s...\n\n", e.username)
 
-	// Step 1: Pull latest changes
+	// Step 1: Pull latest changes. Everything below mutates the repository and the
+	// run needs the remote again to push, so a failed pull is a prerequisite
+	// failure: abort before any local change rather than working from stale state
+	// or an interrupted rebase.
 	if git.HasRemote() && !e.rebuild {
 		fmt.Println("Pulling latest changes...")
 		if !dryRun {
 			if err := git.Pull(); err != nil {
-				fmt.Printf("Warning: git pull failed: %v\n", err)
+				return fmt.Errorf("git pull failed: %w", err)
 			}
 		}
 	}
