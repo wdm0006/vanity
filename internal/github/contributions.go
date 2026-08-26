@@ -202,13 +202,17 @@ query($user: String!, $from: DateTime!, $to: DateTime!) {
 				continue
 			}
 
-			// Filter by since date if provided
+			// Filter by since date if provided. The comparison is date-granular:
+			// since's calendar day is re-fetched so contributions made later that
+			// same day are picked up (merging overwrites by date, so it's idempotent).
 			if !since.IsZero() {
 				dayDate, err := time.Parse("2006-01-02", day.Date)
 				if err != nil {
 					continue
 				}
-				if dayDate.Before(since) || dayDate.Equal(since) {
+				// dayDate parses as UTC, so build since's calendar date in UTC too.
+				sinceDate := time.Date(since.Year(), since.Month(), since.Day(), 0, 0, 0, 0, time.UTC)
+				if dayDate.Before(sinceDate) {
 					continue
 				}
 			}
