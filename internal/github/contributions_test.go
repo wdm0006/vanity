@@ -68,6 +68,108 @@ func TestParseScrapedContributions(t *testing.T) {
 	}
 }
 
+// realPage2024 is a trimmed but byte-for-byte capture of GitHub's own
+// contributions markup — the hand-written fixtures above use single-spaced
+// snippets that do not resemble what the endpoint actually serves.
+func realPage2024(t *testing.T) string {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join("testdata", "contributions-2024.html"))
+	if err != nil {
+		t.Fatalf("reading fixture: %v", err)
+	}
+	return string(body)
+}
+
+func TestParseContributionsFromHTMLReadsRealMarkup(t *testing.T) {
+	html := realPage2024(t)
+
+	got, err := parseContributionsFromHTML(html, 2024)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Every ordinal suffix appears in both its singular ("1 contribution") and
+	// plural ("N contributions") form; the four "No contributions on ..." days
+	// in the fixture must not match at all.
+	want := []Contribution{
+		{Date: "2024-01-30", Count: 2},  // th, plural, first month
+		{Date: "2024-04-23", Count: 1},  // rd, singular
+		{Date: "2024-06-21", Count: 1},  // st, singular
+		{Date: "2024-07-02", Count: 1},  // nd, singular
+		{Date: "2024-07-22", Count: 2},  // nd, plural
+		{Date: "2024-08-05", Count: 1},  // th, singular
+		{Date: "2024-09-01", Count: 8},  // st, plural
+		{Date: "2024-09-23", Count: 24}, // rd, plural
+		{Date: "2024-12-17", Count: 32}, // th, plural, last month
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("got %d contributions, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("contribution %d = %#v, want %#v", i, got[i], want[i])
+		}
+	}
+
+	// The parser reconstructs the date from the tooltip's month name and never
+	// reads the day cell's data-date, so cross-checking against that attribute
+	// catches a wrong entry in the month table independently of the table above.
+	for _, c := range got {
+		if !strings.Contains(html, `data-date="`+c.Date+`"`) {
+			t.Errorf("parsed date %q has no matching data-date attribute in the page", c.Date)
+		}
+	}
+}
+
+func TestParseContributionsFromHTMLIgnoresUnrecognizedMarkup(t *testing.T) {
+	tests := []struct {
+		name string
+		html string
+	}{
+		{name: "empty document", html: ""},
+		{name: "zero-count tooltip", html: `<tool-tip class="sr-only">No contributions on January 1st.</tool-tip>`},
+		{name: "missing ordinal suffix", html: `<tool-tip class="sr-only">5 contributions on April 8.</tool-tip>`},
+		{name: "renamed element", html: `<span class="sr-only">5 contributions on April 8th.</span>`},
+		{name: "localized month name", html: `<tool-tip class="sr-only">5 contributions on Abril 8th.</tool-tip>`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseContributionsFromHTML(tt.html, 2024)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(got) != 0 {
+				t.Fatalf("got %d contributions, want none: %#v", len(got), got)
+			}
+		})
+	}
+}
+
+func TestMonthNameToNumber(t *testing.T) {
+	want := map[string]int{
+		"January": 1, "February": 2, "March": 3, "April": 4,
+		"May": 5, "June": 6, "July": 7, "August": 8,
+		"September": 9, "October": 10, "November": 11, "December": 12,
+		// Unrecognized names resolve to 0, which parseContributionsFromHTML
+		// treats as "skip this tooltip".
+		"":           0,
+		"Jan":        0,
+		"january":    0,
+		"JANUARY":    0,
+		"Enero":      0,
+		"Smarch":     0,
+		"September ": 0,
+	}
+
+	for name, expected := range want {
+		if got := monthNameToNumber(name); got != expected {
+			t.Errorf("monthNameToNumber(%q) = %d, want %d", name, got, expected)
+		}
+	}
+}
+
 // stubGitHubCLI puts a `gh` on PATH that prints the given GraphQL response body.
 func stubGitHubCLI(t *testing.T, response string) {
 	t.Helper()
@@ -97,8 +199,6 @@ func TestFetchContributionsSinceFilter(t *testing.T) {
 		want  []Contribution
 	}{
 		{
-			// Catches the original bug: the last-synced day was skipped because
-			// its midnight was Before the wall-clock timestamp.
 			name:  "same day as since is re-fetched (UTC)",
 			since: time.Date(2024, 1, 15, 14, 0, 0, 0, time.UTC),
 			want: []Contribution{
@@ -107,8 +207,6 @@ func TestFetchContributionsSinceFilter(t *testing.T) {
 			},
 		},
 		{
-			// Catches truncating since in its own location instead of UTC: for a
-			// negative offset that still lands after the UTC-parsed day.
 			name:  "same day as since is re-fetched (negative UTC offset)",
 			since: time.Date(2024, 1, 15, 14, 0, 0, 0, time.FixedZone("EST", -5*60*60)),
 			want: []Contribution{
@@ -117,7 +215,6 @@ func TestFetchContributionsSinceFilter(t *testing.T) {
 			},
 		},
 		{
-			// Catches dropping the filter entirely: earlier days must stay out.
 			name:  "days before since are skipped",
 			since: time.Date(2024, 1, 17, 9, 30, 0, 0, time.UTC),
 			want: []Contribution{

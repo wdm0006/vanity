@@ -54,6 +54,40 @@ func TestMergeContributionsSortsByDate(t *testing.T) {
 	}
 }
 
+func TestMergeContributionsWithEmptyInputs(t *testing.T) {
+	e := &Engine{username: "alice"}
+
+	merged := e.mergeContributions(&ContributionData{Username: "alice"}, nil)
+	if len(merged.Contributions) != 0 {
+		t.Fatalf("both sides empty: got %#v, want no contributions", merged.Contributions)
+	}
+	if merged.Username != "alice" {
+		t.Errorf("got username %q, want %q", merged.Username, "alice")
+	}
+
+	// A first-ever sync: nothing stored yet, everything arrives from GitHub.
+	merged = e.mergeContributions(&ContributionData{Username: "alice"}, []github.Contribution{
+		{Date: "2024-02-01", Count: 2},
+		{Date: "2024-01-05", Count: 9},
+	})
+	want := []Contribution{
+		{Date: "2024-01-05", Count: 9},
+		{Date: "2024-02-01", Count: 2},
+	}
+	if !reflect.DeepEqual(merged.Contributions, want) {
+		t.Fatalf("empty existing: got %#v, want %#v", merged.Contributions, want)
+	}
+
+	// An incremental sync that returned nothing must preserve what is stored.
+	merged = e.mergeContributions(&ContributionData{
+		Username:      "alice",
+		Contributions: want,
+	}, nil)
+	if !reflect.DeepEqual(merged.Contributions, want) {
+		t.Fatalf("empty new: got %#v, want %#v", merged.Contributions, want)
+	}
+}
+
 func TestPrepareRebuildDryRunClearsCountsWithoutTouchingRepo(t *testing.T) {
 	repo := initTestRepo(t, "feature")
 	writeTestFile(t, repo, ".vanity/alice.json", `{"username":"alice"}`)
