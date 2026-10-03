@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.1] - 2026-08-08
+## [0.4.1] - 2026-10-03
 
 ### Fixed
 
@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `.vanity/<user>.json` is now written in date order on every sync. Contributions were previously serialized in random map order, so each sync produced a large spurious diff
 - `vanity import --scrape` no longer hangs indefinitely on an unresponsive connection and no longer gets rejected by GitHub for using the default Go user agent. The request now carries a 30s timeout, a `vanity contribution scraper` user agent, and `Accept-Language: en-US,en;q=0.9` so the page is returned in English, which the tooltip parser requires
 - `vanity import --scrape` now reports an error when a year's page yields zero parsed days while its header claims a non-zero total, instead of silently writing an empty year
+- `vanity sync` now exits non-zero and reports "Sync incomplete:" naming each source it failed to mirror, instead of printing "Sync complete!" and exiting 0. The other sources are still attempted and state is still saved, so recovery stays incremental
+- `vanity sync` now aborts before changing anything when `git pull --rebase` fails, rather than warning and carrying on from stale metadata or an interrupted rebase
+- `vanity sync` no longer duplicates mirror commits when a daily batch fails partway through: the commits already created are recorded, so a retry mirrors only the remainder
+- Incremental `vanity sync` now re-includes the last-synced day, so contributions you make later the same day are picked up on the next run instead of that day's count staying frozen
+- `vanity sync --rebuild` now refuses to run when the repository tracks files outside `.vanity/`, instead of silently dropping them from the rebuilt branch and force-pushing
+- `vanity import` now writes imported contributions in date order
+- `vanity status` now reports inputs it cannot read instead of ignoring them
+- `.vanity/<user>.json` and the sync state file are now written atomically (temp file + rename), so an interrupted write can no longer truncate committed state
 
 ## [0.4.0] - 2026-02-14
 
