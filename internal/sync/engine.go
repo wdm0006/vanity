@@ -1,15 +1,20 @@
 package sync
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/wdm0006/vanity/internal/git"
 	"github.com/wdm0006/vanity/internal/github"
 )
+
+// maxReportedTrackedPaths caps how many offending paths a rebuild refusal lists.
+const maxReportedTrackedPaths = 10
 
 // Engine handles the sync process
 type Engine struct {
@@ -66,12 +71,15 @@ func NewEngine(opts ...Option) (*Engine, error) {
 func (e *Engine) Sync(dryRun bool) error {
 	fmt.Printf("Syncing as %s...\n\n", e.username)
 
-	// Step 1: Pull latest changes
+	// Step 1: Pull latest changes. Everything below mutates the repository and the
+	// run needs the remote again to push, so a failed pull is a prerequisite
+	// failure: abort before any local change rather than working from stale state
+	// or an interrupted rebase.
 	if git.HasRemote() && !e.rebuild {
 		fmt.Println("Pulling latest changes...")
 		if !dryRun {
 			if err := git.Pull(); err != nil {
-				fmt.Printf("Warning: git pull failed: %v\n", err)
+				return fmt.Errorf("git pull failed: %w", err)
 			}
 		}
 	}
@@ -118,20 +126,8 @@ func (e *Engine) Sync(dryRun bool) error {
 		return fmt.Errorf("failed to list synced users: %w", err)
 	}
 
-	totalMirrored := 0
 	batchCount := 0
-	for _, user := range users {
-		if user == e.username {
-			continue
-		}
-
-		mirrored, err := e.mirrorUser(user, state, dryRun, &batchCount)
-		if err != nil {
-			fmt.Printf("Warning: failed to mirror %s: %v\n", user, err)
-			continue
-		}
-		totalMirrored += mirrored
-	}
+	totalMirrored, mirrorErr := e.mirrorAllUsers(users, state, dryRun, &batchCount)
 
 	if totalMirrored > 0 {
 		fmt.Printf("\nCreated %d mirror commits\n", totalMirrored)
@@ -177,8 +173,46 @@ func (e *Engine) Sync(dryRun bool) error {
 		}
 	}
 
+	// State, commits and pushes above still happen on a partial failure, so the
+	// mirror commits that were created are recorded and the next run resumes from
+	// there. The run itself is not a success: report it and exit non-zero.
+	if mirrorErr != nil {
+		fmt.Printf("\nSync incomplete: %v\n", mirrorErr)
+		return mirrorErr
+	}
+
 	fmt.Println("\nSync complete!")
 	return nil
+}
+
+// mirrorAllUsers mirrors every stored source account other than the current user.
+// A source that fails is warned about and skipped so the remaining sources are
+// still attempted; the returned error names every source that failed.
+func (e *Engine) mirrorAllUsers(users []string, state *SyncState, dryRun bool, batchCount *int) (int, error) {
+	totalMirrored := 0
+	attempted := 0
+	var failures []error
+
+	for _, user := range users {
+		if user == e.username {
+			continue
+		}
+		attempted++
+
+		mirrored, err := e.mirrorUser(user, state, dryRun, batchCount)
+		if err != nil {
+			fmt.Printf("Warning: failed to mirror %s: %v\n", user, err)
+			failures = append(failures, fmt.Errorf("%s: %w", user, err))
+			continue
+		}
+		totalMirrored += mirrored
+	}
+
+	if len(failures) > 0 {
+		return totalMirrored, fmt.Errorf("failed to mirror %d of %d source accounts: %w",
+			len(failures), attempted, errors.Join(failures...))
+	}
+	return totalMirrored, nil
 }
 
 // prepareRebuild puts the state into rebuild mode before the mirror loop runs.
@@ -200,6 +234,36 @@ func (e *Engine) prepareRebuild(state *SyncState, dryRun bool) error {
 	return e.rebuildHistory(state)
 }
 
+// ensureDedicatedSyncRepo refuses a rebuild when the repository tracks anything
+// outside .vanity/. Rebuild removes every tracked file before restoring the
+// metadata, so it is only safe in a repository dedicated to syncing.
+func ensureDedicatedSyncRepo() error {
+	tracked, err := git.ListTrackedFiles()
+	if err != nil {
+		return fmt.Errorf("failed to list tracked files: %w", err)
+	}
+
+	var outside []string
+	for _, path := range tracked {
+		if path == vanityDir || strings.HasPrefix(path, vanityDir+"/") {
+			continue
+		}
+		outside = append(outside, path)
+	}
+	if len(outside) == 0 {
+		return nil
+	}
+
+	listed := outside
+	suffix := ""
+	if len(listed) > maxReportedTrackedPaths {
+		listed = listed[:maxReportedTrackedPaths]
+		suffix = fmt.Sprintf(", and %d more", len(outside)-maxReportedTrackedPaths)
+	}
+	return fmt.Errorf("rebuild requires a dedicated sync repository, but %d tracked path(s) are outside %s/: %s%s",
+		len(outside), vanityDir, strings.Join(listed, ", "), suffix)
+}
+
 // rebuildHistory creates a fresh orphan branch, preserving .vanity/ data files
 func (e *Engine) rebuildHistory(state *SyncState) error {
 	currentBranch, err := git.GetCurrentBranch()
@@ -208,6 +272,10 @@ func (e *Engine) rebuildHistory(state *SyncState) error {
 	}
 	if currentBranch == "" {
 		return fmt.Errorf("cannot rebuild from detached HEAD")
+	}
+
+	if err := ensureDedicatedSyncRepo(); err != nil {
+		return err
 	}
 
 	// Read all .vanity/ files into memory
@@ -324,7 +392,15 @@ func (e *Engine) mirrorUser(sourceUser string, state *SyncState, dryRun bool, ba
 			fmt.Printf("  Would create %d commits for %s from %s (had %d, now %d)\n",
 				delta, contrib.Date, sourceUser, alreadyMirrored, contrib.Count)
 		} else {
-			if err := git.CreateBackdatedCommits(contrib.Date, delta, sourceUser); err != nil {
+			created, err := git.CreateBackdatedCommits(contrib.Date, delta, sourceUser)
+			if err != nil {
+				// Checkpoint whatever landed in history so a retry mirrors only the
+				// remaining delta instead of duplicating these commits.
+				if created > 0 {
+					state.SetMirroredCount(sourceUser, contrib.Date, alreadyMirrored+created)
+					mirrored += created
+					*batchCount += created
+				}
 				return mirrored, fmt.Errorf("failed to create commits for %s: %w", contrib.Date, err)
 			}
 		}

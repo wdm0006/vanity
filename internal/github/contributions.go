@@ -208,7 +208,9 @@ query($user: String!, $from: DateTime!, $to: DateTime!) {
 				if err != nil {
 					continue
 				}
-				if dayDate.Before(since) || dayDate.Equal(since) {
+				// dayDate parses as UTC, so build since's calendar date in UTC too.
+				sinceDate := time.Date(since.Year(), since.Month(), since.Day(), 0, 0, 0, 0, time.UTC)
+				if dayDate.Before(sinceDate) {
 					continue
 				}
 			}

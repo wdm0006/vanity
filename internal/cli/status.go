@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -59,15 +60,18 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("Synced users:")
+	var failures []error
 	for _, user := range users {
 		contribPath := filepath.Join(".vanity", user+".json")
 		data, err := os.ReadFile(contribPath)
 		if err != nil {
+			failures = append(failures, fmt.Errorf("%s: read contribution data: %w", contribPath, err))
 			continue
 		}
 
 		var contribs syncpkg.ContributionData
 		if err := json.Unmarshal(data, &contribs); err != nil {
+			failures = append(failures, fmt.Errorf("%s: decode contribution data: %w", contribPath, err))
 			continue
 		}
 
@@ -89,7 +93,9 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	statePath := filepath.Join(".vanity", username+"-state.json")
 	if data, err := os.ReadFile(statePath); err == nil {
 		var state syncpkg.SyncState
-		if err := json.Unmarshal(data, &state); err == nil {
+		if err := json.Unmarshal(data, &state); err != nil {
+			failures = append(failures, fmt.Errorf("%s: decode sync state: %w", statePath, err))
+		} else {
 			fmt.Printf("\nLast sync: %s\n", state.LastSync.Format("2006-01-02 15:04"))
 
 			if len(state.MirroredCounts) > 0 {
@@ -103,7 +109,9 @@ func runStatus(cmd *cobra.Command, args []string) error {
 				}
 			}
 		}
+	} else if !os.IsNotExist(err) {
+		failures = append(failures, fmt.Errorf("%s: read sync state: %w", statePath, err))
 	}
 
-	return nil
+	return errors.Join(failures...)
 }
