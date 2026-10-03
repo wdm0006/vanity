@@ -1,11 +1,15 @@
 package sync
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"testing"
+	"time"
 )
 
 func TestSetMirroredCountBuildsMissingMaps(t *testing.T) {
@@ -143,4 +147,140 @@ func TestListSyncedUsersFailsWithoutAVanityDirectory(t *testing.T) {
 			t.Fatal("expected an error when .vanity/ is missing, got nil")
 		}
 	})
+}
+
+var saveCases = []struct {
+	name string
+	file string
+	save func() error
+	want func() ([]byte, error)
+}{
+	{
+		name: "contribution data",
+		file: "alice.json",
+		save: func() error { return SaveContributionData(testContributionData()) },
+		want: func() ([]byte, error) { return json.MarshalIndent(testContributionData(), "", "  ") },
+	},
+	{
+		name: "sync state",
+		file: "alice-state.json",
+		save: func() error { return SaveSyncState(testSyncState()) },
+		want: func() ([]byte, error) { return json.MarshalIndent(testSyncState(), "", "  ") },
+	},
+}
+
+func testContributionData() *ContributionData {
+	return &ContributionData{
+		Username:    "alice",
+		LastUpdated: time.Date(2024, 3, 1, 12, 0, 0, 0, time.UTC),
+		Contributions: []Contribution{
+			{Date: "2024-01-05", Count: 3},
+			{Date: "2024-01-06", Count: 7},
+		},
+	}
+}
+
+func testSyncState() *SyncState {
+	return &SyncState{
+		Username:       "alice",
+		LastSync:       time.Date(2024, 3, 1, 12, 0, 0, 0, time.UTC),
+		MirroredCounts: map[string]map[string]int{"bob": {"2024-01-05": 2}},
+	}
+}
+
+func vanityDirEntries(t *testing.T) []string {
+	t.Helper()
+	entries, err := os.ReadDir(vanityDir)
+	if err != nil {
+		t.Fatalf("read %s: %v", vanityDir, err)
+	}
+	var names []string
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	return names
+}
+
+func TestSaveWritesIndentedJSONWithMode0644(t *testing.T) {
+	for _, tc := range saveCases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.Mkdir(filepath.Join(dir, vanityDir), 0755); err != nil {
+				t.Fatalf("create %s: %v", vanityDir, err)
+			}
+			withWorkingDirectory(t, dir, func() {
+				path := filepath.Join(vanityDir, tc.file)
+				// Overwrite an existing file to exercise replacement, not just creation.
+				if err := os.WriteFile(path, []byte("old"), 0600); err != nil {
+					t.Fatalf("seed %s: %v", path, err)
+				}
+
+				if err := tc.save(); err != nil {
+					t.Fatalf("save: %v", err)
+				}
+
+				want, err := tc.want()
+				if err != nil {
+					t.Fatalf("marshal: %v", err)
+				}
+				got, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatalf("read %s: %v", path, err)
+				}
+				if string(got) != string(want) {
+					t.Errorf("%s =\n%s\nwant\n%s", path, got, want)
+				}
+				if runtime.GOOS != "windows" {
+					info, err := os.Stat(path)
+					if err != nil {
+						t.Fatalf("stat %s: %v", path, err)
+					}
+					if mode := info.Mode().Perm(); mode != 0644 {
+						t.Errorf("%s mode = %o, want 644", path, mode)
+					}
+				}
+				if names := vanityDirEntries(t); !reflect.DeepEqual(names, []string{tc.file}) {
+					t.Errorf("%s contains %v, want only %s", vanityDir, names, tc.file)
+				}
+			})
+		})
+	}
+}
+
+func TestSaveFailureBeforeReplacementPreservesExistingFile(t *testing.T) {
+	for _, tc := range saveCases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.Mkdir(filepath.Join(dir, vanityDir), 0755); err != nil {
+				t.Fatalf("create %s: %v", vanityDir, err)
+			}
+			replaceErr := errors.New("simulated replace failure")
+			original := renameFile
+			renameFile = func(string, string) error { return replaceErr }
+			t.Cleanup(func() { renameFile = original })
+
+			withWorkingDirectory(t, dir, func() {
+				path := filepath.Join(vanityDir, tc.file)
+				existing := []byte("{\n  \"username\": \"alice\",\n  \"previous\": true\n}")
+				if err := os.WriteFile(path, existing, 0644); err != nil {
+					t.Fatalf("seed %s: %v", path, err)
+				}
+
+				if err := tc.save(); !errors.Is(err, replaceErr) {
+					t.Errorf("save error = %v, want %v", err, replaceErr)
+				}
+
+				got, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatalf("read %s: %v", path, err)
+				}
+				if string(got) != string(existing) {
+					t.Errorf("%s changed after a failed save:\n%s\nwant\n%s", path, got, existing)
+				}
+				if names := vanityDirEntries(t); !reflect.DeepEqual(names, []string{tc.file}) {
+					t.Errorf("%s contains %v after a failed save, want only %s", vanityDir, names, tc.file)
+				}
+			})
+		})
+	}
 }

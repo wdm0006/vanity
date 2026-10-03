@@ -9,6 +9,10 @@ import (
 
 const vanityDir = ".vanity"
 
+// renameFile publishes a completed temporary file; tests replace it to simulate
+// a failure after the payload is written but before the destination changes.
+var renameFile = os.Rename
+
 // ContributionData holds contribution history for a user
 type ContributionData struct {
 	Username      string         `json:"username"`
@@ -57,7 +61,7 @@ func SaveContributionData(data *ContributionData) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, jsonData, 0644)
+	return writeFileAtomic(path, jsonData, 0644)
 }
 
 // LoadSyncState loads sync state for a user
@@ -91,7 +95,37 @@ func SaveSyncState(state *SyncState) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, jsonData, 0644)
+	return writeFileAtomic(path, jsonData, 0644)
+}
+
+// writeFileAtomic writes data to a temporary file beside path and renames it
+// over path, so a failed write never truncates the existing file.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) (err error) {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		if err != nil {
+			tmp.Close()
+			os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err = tmp.Write(data); err != nil {
+		return err
+	}
+	if err = tmp.Sync(); err != nil {
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	if err = os.Chmod(tmpPath, perm); err != nil {
+		return err
+	}
+	return renameFile(tmpPath, path)
 }
 
 // ListSyncedUsers returns a list of usernames that have contribution data
