@@ -299,7 +299,7 @@ func parseScrapedContributions(html string, year int) ([]Contribution, error) {
 		return contributions, nil
 	}
 
-	totalRegex := regexp.MustCompile(fmt.Sprintf(`([\d,]+) contributions? in %d`, year))
+	totalRegex := regexp.MustCompile(fmt.Sprintf(`([\d,]+)\s+contributions?\s+in\s+%d`, year))
 	match := totalRegex.FindStringSubmatch(html)
 	if len(match) != 2 {
 		return contributions, nil

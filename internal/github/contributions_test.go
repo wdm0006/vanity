@@ -22,6 +22,11 @@ func TestParseScrapedContributions(t *testing.T) {
 			wantErrorContains: "parsed 0 days but reports 2510 contributions",
 		},
 		{
+			name:              "positive total in GitHub's multi-line indented header",
+			html:              "<h2 tabindex=\"-1\" id=\"js-contribution-activity-description\" class=\"f4 text-normal mb-2\">\n      1,759\n      contributions\n        in 2023\n    </h2><tool-tip>changed markup</tool-tip>",
+			wantErrorContains: "parsed 0 days but reports 1759 contributions",
+		},
+		{
 			name: "zero total without tooltips",
 			html: `<h2>0 contributions in 2023</h2>`,
 		},
