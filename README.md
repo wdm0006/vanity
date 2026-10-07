@@ -66,7 +66,7 @@ vanity sync
 | `vanity init` | Set up a repo for syncing |
 | `vanity sync` | Fetch, mirror, and push contributions |
 | `vanity import <user>` | Import contributions from another account |
-| `vanity status` | Show sync state and connected accounts |
+| `vanity status` | Show sync state and connected accounts (`--json` for machine-readable output) |
 
 ### Sync options
 

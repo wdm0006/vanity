@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -77,6 +78,95 @@ func TestRunStatusAllowsMissingCurrentUserState(t *testing.T) {
 	if !strings.Contains(output, "  - alice (you): 4 contributions, last updated 2024-04-05 12:30\n") {
 		t.Fatalf("runStatus() output missing exact valid account row:\n%s", output)
 	}
+}
+
+func TestRunStatusJSONPrintsExactTotals(t *testing.T) {
+	repo := setupStatusTest(t)
+	setStatusJSON(t)
+	writeStatusFile(t, repo, ".vanity/alice.json", `{
+  "username": "alice",
+  "last_updated": "2024-04-05T12:30:00Z",
+  "contributions": [{"date": "2024-04-04", "count": 7}, {"date": "2024-04-05", "count": 5}]
+}`)
+	writeStatusFile(t, repo, ".vanity/bob.json", `{
+  "username": "bob",
+  "last_updated": "2024-03-01T08:00:00Z",
+  "contributions": [{"date": "2024-03-01", "count": 3}]
+}`)
+	writeStatusFile(t, repo, ".vanity/alice-state.json", `{
+  "username": "alice",
+  "last_sync": "2024-04-05T12:30:00Z",
+  "mirrored_counts": {"bob": {"2024-03-01": 2, "2024-02-01": 1}}
+}`)
+
+	output, err := captureStatusOutput(t, func() error {
+		return runStatus(statusCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("runStatus() error = %v", err)
+	}
+	var got statusReport
+	if err := json.Unmarshal([]byte(output), &got); err != nil {
+		t.Fatalf("stdout is not a single JSON document: %v\n%s", err, output)
+	}
+	if got.CurrentUser != "alice" || len(got.Accounts) != 2 || len(got.Mirrored) != 1 {
+		t.Fatalf("unexpected report: %+v", got)
+	}
+	if a := got.Accounts[0]; a.Username != "alice" || a.Total != 12 || a.LastUpdated.Format("2006-01-02T15:04") != "2024-04-05T12:30" {
+		t.Fatalf("accounts[0] = %+v", a)
+	}
+	if a := got.Accounts[1]; a.Username != "bob" || a.Total != 3 {
+		t.Fatalf("accounts[1] = %+v", a)
+	}
+	if m := got.Mirrored[0]; m.Source != "bob" || m.Dates != 2 || m.Total != 3 {
+		t.Fatalf("mirrored[0] = %+v", m)
+	}
+}
+
+func TestRunStatusJSONKeepsValidRowsOnMalformedInput(t *testing.T) {
+	repo := setupStatusTest(t)
+	setStatusJSON(t)
+	writeStatusFile(t, repo, ".vanity/alice.json", `{
+  "username": "alice",
+  "last_updated": "2024-04-05T12:30:00Z",
+  "contributions": [{"date": "2024-04-05", "count": 4}]
+}`)
+	writeStatusFile(t, repo, ".vanity/broken.json", `{"contributions":`)
+
+	output, err := captureStatusOutput(t, func() error {
+		return runStatus(statusCmd, nil)
+	})
+	if err == nil || !strings.Contains(err.Error(), ".vanity/broken.json") {
+		t.Fatalf("runStatus() error = %v, want broken.json error", err)
+	}
+	var got statusReport
+	if err := json.Unmarshal([]byte(output), &got); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, output)
+	}
+	if len(got.Accounts) != 1 || got.Accounts[0].Username != "alice" || got.Accounts[0].Total != 4 {
+		t.Fatalf("accounts = %+v, want only alice with 4", got.Accounts)
+	}
+}
+
+func TestRunStatusJSONEmptyRepoPrintsEmptyArrays(t *testing.T) {
+	setupStatusTest(t)
+	setStatusJSON(t)
+
+	output, err := captureStatusOutput(t, func() error {
+		return runStatus(statusCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("runStatus() error = %v", err)
+	}
+	if !strings.Contains(output, `"accounts": []`) || !strings.Contains(output, `"mirrored": []`) {
+		t.Fatalf("want empty arrays, got:\n%s", output)
+	}
+}
+
+func setStatusJSON(t *testing.T) {
+	t.Helper()
+	statusJSON = true
+	t.Cleanup(func() { statusJSON = false })
 }
 
 func setupStatusTest(t *testing.T) string {

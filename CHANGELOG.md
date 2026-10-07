@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `vanity status --json` prints a single JSON document (current user, per-account totals and last-updated times, per-source mirror counts) for scripts and scheduled runs. Unreadable inputs still produce a non-zero exit with the valid rows included
+
 ## [0.4.1] - 2026-10-03
 
 ### Fixed
