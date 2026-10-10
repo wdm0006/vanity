@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `vanity status --json` prints a single JSON document (current user, per-account totals and last-updated times, per-source mirror counts) for scripts and scheduled runs. Unreadable inputs still produce a non-zero exit with the valid rows included
+- `vanity doctor` runs read-only preflight checks (repo, `gh` auth, `git config user.email` linked to your GitHub account) and exits 1 on failure
 
 ## [0.4.1] - 2026-10-03
 
