@@ -374,3 +374,27 @@ func monthNameToNumber(name string) int {
 	}
 	return months[name]
 }
+
+// UserEmail is one entry of GET /user/emails.
+type UserEmail struct {
+	Email    string `json:"email"`
+	Verified bool   `json:"verified"`
+}
+
+// GetUserEmails returns the authenticated account's email addresses.
+// It fails when the token lacks the user:email scope.
+func GetUserEmails() ([]UserEmail, error) {
+	cmd := exec.Command("gh", "api", "user/emails")
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("gh command failed: %s", strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return nil, fmt.Errorf("failed to run gh: %w", err)
+	}
+	var emails []UserEmail
+	if err := json.Unmarshal(output, &emails); err != nil {
+		return nil, fmt.Errorf("failed to parse user emails: %w", err)
+	}
+	return emails, nil
+}

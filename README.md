@@ -67,6 +67,7 @@ vanity sync
 | `vanity sync` | Fetch, mirror, and push contributions |
 | `vanity import <user>` | Import contributions from another account |
 | `vanity status` | Show sync state and connected accounts (`--json` for machine-readable output) |
+| `vanity doctor` | Check git email, `gh` auth and repo setup before syncing (read-only) |
 
 ### Sync options
 
