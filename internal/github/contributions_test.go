@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -124,6 +125,58 @@ func TestParseContributionsFromHTMLReadsRealMarkup(t *testing.T) {
 		if !strings.Contains(html, `data-date="`+c.Date+`"`) {
 			t.Errorf("parsed date %q has no matching data-date attribute in the page", c.Date)
 		}
+	}
+}
+
+func TestParseContributionsFromHTMLJoinsTooltipToDataDate(t *testing.T) {
+	cell := func(date, id string) string {
+		return `<td data-date="` + date + `" id="` + id + `" data-level="1"></td>`
+	}
+	tip := func(forID, text string) string {
+		return `<tool-tip for="` + forID + `" class="sr-only">` + text + `</tool-tip>`
+	}
+
+	tests := []struct {
+		name string
+		html string
+		want []Contribution
+	}{
+		{
+			name: "localized wording",
+			html: cell("2024-04-08", "c-1") + cell("2024-04-09", "c-2") +
+				tip("c-1", "5 contribuciones el 8 de abril.") +
+				tip("c-2", "Sin contribuciones el 9 de abril."),
+			want: []Contribution{{Date: "2024-04-08", Count: 5}},
+		},
+		{
+			name: "tooltips before cells and out of order are sorted by date",
+			html: tip("c-2", "3 Beiträge am 2. Februar") + tip("c-1", "1 Beitrag am 1. Januar") +
+				cell("2024-02-02", "c-2") + cell("2024-01-01", "c-1"),
+			want: []Contribution{{Date: "2024-01-01", Count: 1}, {Date: "2024-02-02", Count: 3}},
+		},
+		{
+			name: "cell without tooltip and tooltip without cell are skipped",
+			html: cell("2024-05-01", "c-1") + cell("2024-05-02", "c-2") +
+				tip("c-2", "4 contributions on May 2nd.") + tip("missing", "9 contributions on May 3rd."),
+			want: []Contribution{{Date: "2024-05-02", Count: 4}},
+		},
+		{
+			name: "English no-contributions tooltip with a day number is not a count",
+			html: cell("2024-01-01", "c-1") + tip("c-1", "No contributions on January 1st."),
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseContributionsFromHTML(tt.html, 2024)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("got %#v, want %#v", got, tt.want)
+			}
+		})
 	}
 }
 
