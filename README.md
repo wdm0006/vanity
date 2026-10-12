@@ -59,11 +59,17 @@ vanity import --scrape old-work-username   # includes private contributions
 vanity sync
 ```
 
+## Run it on a schedule
+
+`vanity init --with-workflow` also writes `.github/workflows/vanity-sync.yml` (never overwriting an existing file): a daily cron plus manual `workflow_dispatch` that runs `vanity doctor` then `vanity sync`.
+
+The workflow runs as the account that owns the `VANITY_TOKEN` secret, so create a personal access token (`repo` scope) for that account and add it as a repository secret. The default `GITHUB_TOKEN` authenticates as a bot, not as you, so it cannot be used. Also set the repository variables `VANITY_GIT_NAME` and `VANITY_GIT_EMAIL` (an email linked to that account). Each account needs its own checkout or runner with its own secret and variables.
+
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `vanity init` | Set up a repo for syncing |
+| `vanity init` | Set up a repo for syncing (`--with-workflow` adds a scheduled sync workflow) |
 | `vanity sync` | Fetch, mirror, and push contributions |
 | `vanity import <user>` | Import contributions from another account |
 | `vanity status` | Show sync state and connected accounts (`--json` for machine-readable output) |

@@ -1,12 +1,20 @@
 package cli
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
 )
+
+//go:embed templates/vanity-sync.yml
+var syncWorkflowTemplate []byte
+
+const syncWorkflowPath = ".github/workflows/vanity-sync.yml"
+
+var initWithWorkflow bool
 
 var initCmd = &cobra.Command{
 	Use:   "init",
@@ -19,8 +27,33 @@ Each collaborator should clone the repo and run 'vanity sync' to join.`,
   vanity init
 
   # Then sync your contributions
-  vanity sync`,
+  vanity sync
+
+  # Also scaffold a scheduled GitHub Actions sync workflow
+  vanity init --with-workflow`,
 	RunE: runInit,
+}
+
+func init() {
+	initCmd.Flags().BoolVar(&initWithWorkflow, "with-workflow", false, "Also write "+syncWorkflowPath)
+}
+
+func writeSyncWorkflow() error {
+	if _, err := os.Stat(syncWorkflowPath); err == nil {
+		fmt.Println(syncWorkflowPath, "already exists; leaving it unchanged")
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to check %s: %w", syncWorkflowPath, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(syncWorkflowPath), 0755); err != nil {
+		return fmt.Errorf("failed to create workflow directory: %w", err)
+	}
+	if err := os.WriteFile(syncWorkflowPath, syncWorkflowTemplate, 0644); err != nil {
+		return fmt.Errorf("failed to write %s: %w", syncWorkflowPath, err)
+	}
+	fmt.Println("Wrote", syncWorkflowPath)
+	fmt.Println("Add the VANITY_TOKEN secret (a PAT for this account) and the VANITY_GIT_NAME / VANITY_GIT_EMAIL variables.")
+	return nil
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
@@ -44,6 +77,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("Initialized vanity in", vanityDir)
+	if initWithWorkflow {
+		if err := writeSyncWorkflow(); err != nil {
+			return err
+		}
+	}
 	fmt.Println("\nNext steps:")
 	fmt.Println("  1. Invite collaborators to this repository")
 	fmt.Println("  2. Run 'vanity sync' to sync your contributions")

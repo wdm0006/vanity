@@ -1,0 +1,53 @@
+# Scheduled vanity sync.
+#
+# Identity: this workflow runs AS the GitHub account that owns VANITY_TOKEN.
+# Create a personal access token (repo scope) for that account and store it as
+# the repository secret VANITY_TOKEN. The default GITHUB_TOKEN authenticates as
+# a bot, not as you, so it cannot be used: mirrored commits would be attributed
+# to the wrong identity.
+#
+# Each participating account needs its own checkout of the shared repo (or
+# runner) with its own VANITY_TOKEN, VANITY_GIT_NAME and VANITY_GIT_EMAIL.
+# VANITY_GIT_EMAIL must be an email linked to that account (see 'vanity doctor').
+name: vanity-sync
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vanity-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.VANITY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.VANITY_TOKEN }}
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+
+      - name: Install vanity
+        run: go install github.com/wdm0006/vanity/cmd/vanity@latest
+
+      - name: Configure git identity
+        run: |
+          git config user.name "${{ vars.VANITY_GIT_NAME }}"
+          git config user.email "${{ vars.VANITY_GIT_EMAIL }}"
+
+      - name: Doctor
+        run: vanity doctor
+
+      - name: Sync
+        run: vanity sync
