@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -313,8 +314,61 @@ func parseScrapedContributions(html string, year int) ([]Contribution, error) {
 	return nil, fmt.Errorf("scraped contribution page for %d parsed 0 days but reports %d contributions — GitHub markup may have changed", year, total)
 }
 
-// parseContributionsFromHTML extracts contribution data from the HTML
+var (
+	dayCellRegex    = regexp.MustCompile(`<td\b[^>]*>`)
+	toolTipRegex    = regexp.MustCompile(`(?s)<tool-tip\b([^>]*)>(.*?)</tool-tip>`)
+	dataDateRegex   = regexp.MustCompile(`\sdata-date="(\d{4}-\d{2}-\d{2})"`)
+	idAttrRegex     = regexp.MustCompile(`\sid="([^"]+)"`)
+	forAttrRegex    = regexp.MustCompile(`\sfor="([^"]+)"`)
+	leadingIntRegex = regexp.MustCompile(`^\s*(\d+)`)
+)
+
+// parseContributionsFromHTML extracts contribution data from the HTML. Day
+// cells carry the authoritative date; the count comes from the sibling
+// <tool-tip for="<cell id>"> whose text starts with the number. Pages without
+// any data-date cells fall back to the English tooltip wording.
 func parseContributionsFromHTML(html string, year int) ([]Contribution, error) {
+	dateByID := make(map[string]string)
+	cells := 0
+	for _, tag := range dayCellRegex.FindAllString(html, -1) {
+		d := dataDateRegex.FindStringSubmatch(tag)
+		id := idAttrRegex.FindStringSubmatch(tag)
+		if d == nil || id == nil {
+			continue
+		}
+		cells++
+		dateByID[id[1]] = d[1]
+	}
+	if cells == 0 {
+		return parseEnglishTooltips(html, year)
+	}
+
+	var contributions []Contribution
+	for _, m := range toolTipRegex.FindAllStringSubmatch(html, -1) {
+		f := forAttrRegex.FindStringSubmatch(m[1])
+		if f == nil {
+			continue
+		}
+		date, ok := dateByID[f[1]]
+		if !ok {
+			continue
+		}
+		n := leadingIntRegex.FindStringSubmatch(m[2])
+		if n == nil {
+			continue
+		}
+		count, err := strconv.Atoi(n[1])
+		if err != nil || count == 0 {
+			continue
+		}
+		contributions = append(contributions, Contribution{Date: date, Count: count})
+	}
+	sort.Slice(contributions, func(i, j int) bool { return contributions[i].Date < contributions[j].Date })
+	return contributions, nil
+}
+
+// parseEnglishTooltips is the fallback for pages with no data-date cells.
+func parseEnglishTooltips(html string, year int) ([]Contribution, error) {
 	var contributions []Contribution
 
 	// Match tooltips like: >5 contributions on April 8th.</tool-tip>
